@@ -54,19 +54,17 @@ axes:
         # This pin will be set high when homing is initiated
         homing_pin: gpio.26
 
-        # Homing mode: "hold" or "pulse"
-        # - hold: Signal stays active for homing_signal_ms duration
-        # - pulse: Signal pulses for homing_signal_ms, then waits homing_settle_ms
+        # Example: Hold mode with event-driven completion
         homing_mode: hold
+        homing_signal_ms: 5000      # Max time to hold (safety timeout)
 
-        # Duration of the homing signal (ms)
-        # For hold mode: how long the signal stays active
-        # For pulse mode: how long the pulse lasts
-        homing_signal_ms: 2000
+        # Optional: Use complete pin for early signal release
+        # When motor finishes, it sets this pin and we release signal early
+        homing_complete_pin: gpio.36
+        homing_complete_active_high: true
 
-        # Settle duration (ms) - only used in pulse mode
-        # Time to wait after pulse for motor to complete homing
-        homing_settle_ms: 5000
+        # Fallback if complete pin not configured
+        homing_settle_ms: 0  # Not used in hold mode
 
         # Alarm pin configuration
         # This pin is monitored for fault conditions from the motor

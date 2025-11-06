@@ -31,7 +31,7 @@ The driver can monitor an alarm/fault pin from the motor and trigger configurabl
 
 ## Configuration
 
-### Basic Configuration Example - Hold Mode
+### Basic Configuration Example - Hold Mode (Time-Based)
 
 ```yaml
 x:
@@ -47,6 +47,33 @@ x:
       homing_mode: hold
       homing_signal_ms: 2000      # Signal stays active for 2 seconds
       homing_settle_ms: 0         # Not used in hold mode
+
+      # Alarm pin configuration
+      alarm_pin: gpio.27
+      alarm_active_high: false
+      alarm_action: estop
+```
+
+### Basic Configuration Example - Hold Mode (Event-Driven)
+
+```yaml
+x:
+  motor0:
+    signal_homing_stepper:
+      # Standard stepper pins
+      step_pin: I2SO.0
+      direction_pin: I2SO.1
+      disable_pin: I2SO.2
+
+      # Signal homing configuration - Hold Mode with Complete Pin
+      homing_pin: gpio.26
+      homing_mode: hold
+      homing_signal_ms: 5000      # Max time to hold signal (safety timeout)
+
+      # Event-driven completion
+      homing_complete_pin: gpio.34
+      homing_complete_active_high: true
+      # homing_max_wait_ms not used in hold mode
 
       # Alarm pin configuration
       alarm_pin: gpio.27
@@ -105,13 +132,15 @@ y:
 
 #### Homing Complete Detection (Optional)
 - `homing_complete_pin`: Pin to monitor for homing completion signal (optional)
-  - When configured in pulse mode, driver waits for this pin instead of using timeout
+  - **In hold mode**: Releases homing signal early when complete pin signals
+  - **In pulse mode**: Waits for this pin instead of using settle timeout
   - Motor sets this pin when homing is complete
-  - Falls back to `homing_settle_ms` timeout if pin not configured
+  - Falls back to timeout if pin not configured
 - `homing_complete_active_high`: Set to `true` if complete signal is active-high, `false` if active-low (default: true)
-- `homing_max_wait_ms`: Maximum time to wait for complete signal before timeout (default: 10000)
+- `homing_max_wait_ms`: Maximum time to wait for complete signal in **pulse mode** (default: 10000)
   - Safety feature to prevent infinite waiting
   - If exceeded, assumes homing is complete anyway
+  - **Note**: In hold mode, `homing_signal_ms` is used as the maximum wait time instead
 
 #### Alarm Parameters
 - `alarm_pin`: Pin to monitor for motor alarms/faults (optional)
@@ -188,13 +217,21 @@ macros:
 When a homing cycle (`$H` or `$HX`) is initiated with hold mode:
 
 1. **Signal Active**: The homing pin is set high
-2. **Hold Period**: The signal stays active for `homing_signal_ms` milliseconds
+2. **Wait for Completion**:
+   - **Option A (Event-Driven)**: If `homing_complete_pin` is configured:
+     - Hold signal active while polling the complete pin every 10ms
+     - When pin indicates completion, release signal immediately
+     - If `homing_signal_ms` timeout is reached, release signal anyway
+   - **Option B (Time-Based)**: If `homing_complete_pin` is NOT configured:
+     - Hold signal for `homing_signal_ms` milliseconds
 3. **Signal Released**: The homing pin is set low
 4. **Completion**: The motor is marked as homed at the configured home position (`mpos_mm`)
 
 The motor is expected to complete its internal homing routine while the signal is held active.
 
 **Use case**: Motors that need a continuous "enable homing" signal during the entire homing process.
+
+**Advantage of complete pin in hold mode**: Signal is released as soon as motor completes, potentially allowing faster power-down or re-enabling of the motor.
 
 ### Pulse Mode
 
@@ -222,9 +259,14 @@ The motor starts homing when the pulse is received and completes either when sig
 
 | Mode | Signal Duration | Wait After Signal | Total Time |
 |------|----------------|-------------------|------------|
-| Hold | `homing_signal_ms` | 0 | `homing_signal_ms` |
+| Hold (time-based) | `homing_signal_ms` | 0 | `homing_signal_ms` |
+| Hold (event-driven) | Until complete pin or `homing_signal_ms` | 0 | Actual homing time (max `homing_signal_ms`) |
 | Pulse (time-based) | `homing_signal_ms` | `homing_settle_ms` | `homing_signal_ms + homing_settle_ms` |
 | Pulse (event-driven) | `homing_signal_ms` | Until complete pin or `homing_max_wait_ms` | `homing_signal_ms` + actual homing time |
+
+**Key differences:**
+- **Hold mode with complete pin**: Uses `homing_signal_ms` as maximum, releases signal early when complete
+- **Pulse mode with complete pin**: Uses `homing_max_wait_ms` as maximum, allows longer wait after pulse
 
 ## Alarm Handling
 
@@ -345,6 +387,12 @@ macros:
 - Motor driver-specific documentation for your hardware
 
 ## Version History
+
+- **v1.3** (2025): Extended event-driven completion to hold mode
+  - Homing complete pin now works in both hold and pulse modes
+  - Hold mode: releases signal early when complete pin signals
+  - Pulse mode: waits for complete pin after pulse
+  - Different timeout handling per mode (homing_signal_ms vs homing_max_wait_ms)
 
 - **v1.2** (2025): Added event-driven homing complete detection
   - Optional homing complete pin for pulse mode

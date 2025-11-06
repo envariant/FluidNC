@@ -71,15 +71,29 @@ namespace MotorDrivers {
         _isHoming = true;
 
         if (_homingMode == HomingMode::Hold) {
-            // Mode A: Hold signal active for entire homing duration
+            // Mode A: Hold signal active until completion or timeout
             _homingPin.synchronousWrite(true);
-            log_info(axisName() << " SignalHomingStepper: Homing signal active (hold mode, "
-                     << _homingSignalMs << "ms)");
 
-            delay_ms(_homingSignalMs);
+            if (_homingCompletePin.defined()) {
+                // Event-driven hold mode: wait for complete signal while holding
+                log_info(axisName() << " SignalHomingStepper: Homing signal active (hold mode, "
+                         << "waiting for complete signal, max " << _homingSignalMs << "ms)");
+
+                if (waitForHomingComplete(_homingSignalMs)) {
+                    log_info(axisName() << " SignalHomingStepper: Homing complete signal received");
+                } else {
+                    log_warn(axisName() << " SignalHomingStepper: Homing complete timeout ("
+                             << _homingSignalMs << "ms), assuming done");
+                }
+            } else {
+                // Time-based hold mode: hold for fixed duration
+                log_info(axisName() << " SignalHomingStepper: Homing signal active (hold mode, "
+                         << _homingSignalMs << "ms)");
+                delay_ms(_homingSignalMs);
+                log_info(axisName() << " SignalHomingStepper: Homing complete");
+            }
 
             _homingPin.synchronousWrite(false);
-            log_info(axisName() << " SignalHomingStepper: Homing complete");
 
         } else {
             // Mode B: Pulse signal briefly, then wait for motor to complete homing
@@ -96,7 +110,7 @@ namespace MotorDrivers {
                 log_info(axisName() << " SignalHomingStepper: Waiting for homing complete signal (max "
                          << _homingMaxWaitMs << "ms)");
 
-                if (waitForHomingComplete()) {
+                if (waitForHomingComplete(_homingMaxWaitMs)) {
                     log_info(axisName() << " SignalHomingStepper: Homing complete signal received");
                 } else {
                     log_warn(axisName() << " SignalHomingStepper: Homing complete timeout, assuming done");
@@ -111,7 +125,7 @@ namespace MotorDrivers {
         }
     }
 
-    bool SignalHomingStepper::waitForHomingComplete() {
+    bool SignalHomingStepper::waitForHomingComplete(uint32_t maxWaitMs) {
         if (!_homingCompletePin.defined()) {
             return false;
         }
@@ -119,7 +133,7 @@ namespace MotorDrivers {
         uint32_t startTime = millis();
         const uint32_t pollIntervalMs = 10; // Check every 10ms
 
-        while ((millis() - startTime) < _homingMaxWaitMs) {
+        while ((millis() - startTime) < maxWaitMs) {
             bool pinState = _homingCompletePin.read();
             bool completeSignal = _homingCompleteActiveHigh ? pinState : !pinState;
 

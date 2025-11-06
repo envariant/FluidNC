@@ -36,7 +36,8 @@ namespace MotorDrivers {
      *
      * Optional homing complete detection:
      * - Configure a homing_complete_pin to detect when motor finishes homing
-     * - In pulse mode, waits for this pin instead of using timeout
+     * - In hold mode: releases signal early when complete pin signals
+     * - In pulse mode: waits for complete pin instead of using settle timeout
      * - Falls back to timeout if pin not configured or max wait exceeded
      *
      * It also supports an alarm pin that can trigger various actions:
@@ -95,7 +96,7 @@ namespace MotorDrivers {
         // Helper methods
         void            startHomingSequence();
         void            finishHomingSequence();
-        bool            waitForHomingComplete();         // Wait for homing complete pin signal
+        bool            waitForHomingComplete(uint32_t maxWaitMs);  // Wait for homing complete pin signal
         static HomingMode parseHomingMode(const char* str);
         static const char* homingModeToString(HomingMode mode);
         static AlarmAction parseAlarmAction(const char* str);
