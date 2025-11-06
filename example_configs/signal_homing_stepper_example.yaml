@@ -108,10 +108,17 @@ axes:
         disable_pin: I2SO.5
         homing_pin: gpio.32
 
-        # Example: Using pulse mode
-        # Brief 100ms pulse followed by 3s wait
+        # Example: Using pulse mode with homing complete detection
         homing_mode: pulse
         homing_signal_ms: 100
+
+        # Optional: Use homing complete pin for event-driven completion
+        # If configured, waits for this pin instead of using timeout
+        homing_complete_pin: gpio.35
+        homing_complete_active_high: true  # Pin goes high when homing done
+        homing_max_wait_ms: 8000           # Safety timeout
+
+        # Fallback if complete pin not configured
         homing_settle_ms: 3000
 
         alarm_pin: gpio.33

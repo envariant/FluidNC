@@ -9,6 +9,7 @@
 #include "../NutsBolts.h"
 
 #include <cstring>
+#include <esp32-hal.h>  // millis()
 
 using namespace Machine;
 
@@ -36,6 +37,11 @@ namespace MotorDrivers {
         if (_homingPin.defined()) {
             _homingPin.setAttr(Pin::Attr::Output);
             _homingPin.synchronousWrite(false);  // Start with signal off
+        }
+
+        // Initialize homing complete pin if configured
+        if (_homingCompletePin.defined()) {
+            _homingCompletePin.setAttr(Pin::Attr::Input);
         }
 
         // Initialize alarm pin if configured
@@ -84,14 +90,47 @@ namespace MotorDrivers {
             delay_ms(_homingSignalMs);
 
             _homingPin.synchronousWrite(false);
-            log_info(axisName() << " SignalHomingStepper: Waiting for motor to home ("
-                     << _homingSettleMs << "ms)");
 
-            delay_ms(_homingSettleMs);
+            // Check if we should wait for complete pin or use timeout
+            if (_homingCompletePin.defined()) {
+                log_info(axisName() << " SignalHomingStepper: Waiting for homing complete signal (max "
+                         << _homingMaxWaitMs << "ms)");
 
-            log_info(axisName() << " SignalHomingStepper: Homing complete (total: "
-                     << (_homingSignalMs + _homingSettleMs) << "ms)");
+                if (waitForHomingComplete()) {
+                    log_info(axisName() << " SignalHomingStepper: Homing complete signal received");
+                } else {
+                    log_warn(axisName() << " SignalHomingStepper: Homing complete timeout, assuming done");
+                }
+            } else {
+                log_info(axisName() << " SignalHomingStepper: Waiting for motor to home ("
+                         << _homingSettleMs << "ms)");
+                delay_ms(_homingSettleMs);
+                log_info(axisName() << " SignalHomingStepper: Homing complete (total: "
+                         << (_homingSignalMs + _homingSettleMs) << "ms)");
+            }
         }
+    }
+
+    bool SignalHomingStepper::waitForHomingComplete() {
+        if (!_homingCompletePin.defined()) {
+            return false;
+        }
+
+        uint32_t startTime = millis();
+        const uint32_t pollIntervalMs = 10; // Check every 10ms
+
+        while ((millis() - startTime) < _homingMaxWaitMs) {
+            bool pinState = _homingCompletePin.read();
+            bool completeSignal = _homingCompleteActiveHigh ? pinState : !pinState;
+
+            if (completeSignal) {
+                return true;  // Homing complete signal detected
+            }
+
+            delay_ms(pollIntervalMs);
+        }
+
+        return false;  // Timeout
     }
 
     void SignalHomingStepper::finishHomingSequence() {
@@ -157,14 +196,23 @@ namespace MotorDrivers {
         if (_homingMode == HomingMode::Hold) {
             homingInfo = std::to_string(_homingSignalMs) + "ms hold";
         } else {
-            homingInfo = std::to_string(_homingSignalMs) + "ms pulse, " +
-                        std::to_string(_homingSettleMs) + "ms settle";
+            if (_homingCompletePin.defined()) {
+                homingInfo = std::to_string(_homingSignalMs) + "ms pulse, wait for complete pin";
+            } else {
+                homingInfo = std::to_string(_homingSignalMs) + "ms pulse, " +
+                            std::to_string(_homingSettleMs) + "ms settle";
+            }
         }
+
+        std::string completeInfo = _homingCompletePin.defined()
+            ? (" Complete:" + _homingCompletePin.name())
+            : "";
 
         log_info("    " << name() << " Step:" << _step_pin.name()
                  << " Dir:" << _dir_pin.name()
                  << " Disable:" << _disable_pin.name()
                  << " Homing:" << _homingPin.name() << "(" << homingModeToString(_homingMode) << ": " << homingInfo << ")"
+                 << completeInfo
                  << " Alarm:" << _alarmPin.name() << "(" << alarmActionToString(_alarmAction) << ")");
     }
 
@@ -187,6 +235,11 @@ namespace MotorDrivers {
         handler.section("homing_mode", _homingMode, parseHomingMode, homingModeToString);
         handler.item("homing_signal_ms", _homingSignalMs);
         handler.item("homing_settle_ms", _homingSettleMs);
+
+        // Add homing complete detection
+        handler.item("homing_complete_pin", _homingCompletePin);
+        handler.item("homing_complete_active_high", _homingCompleteActiveHigh);
+        handler.item("homing_max_wait_ms", _homingMaxWaitMs);
 
         // Add alarm configuration
         handler.item("alarm_pin", _alarmPin);

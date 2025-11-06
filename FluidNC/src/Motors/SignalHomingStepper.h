@@ -34,6 +34,11 @@ namespace MotorDrivers {
      * - Hold: Signal is held active for the entire duration until homing completes
      * - Pulse: Signal is pulsed briefly, then released while waiting for motor to home
      *
+     * Optional homing complete detection:
+     * - Configure a homing_complete_pin to detect when motor finishes homing
+     * - In pulse mode, waits for this pin instead of using timeout
+     * - Falls back to timeout if pin not configured or max wait exceeded
+     *
      * It also supports an alarm pin that can trigger various actions:
      * - e-stop: Trigger an alarm and halt the system
      * - pause: Pause program execution (feed hold)
@@ -77,6 +82,9 @@ namespace MotorDrivers {
         HomingMode      _homingMode = HomingMode::Hold;  // Homing signal mode
         uint32_t        _homingSignalMs = 100;           // Duration of homing signal pulse/hold
         uint32_t        _homingSettleMs = 2000;          // Time to wait for motor to complete homing
+        Pin             _homingCompletePin;              // Optional pin to detect homing completion
+        bool            _homingCompleteActiveHigh = true; // Homing complete pin polarity
+        uint32_t        _homingMaxWaitMs = 10000;        // Maximum time to wait for homing complete signal
         MotorAlarmPin   _alarmPin;                       // Pin to monitor for alarm conditions
         bool            _alarmActiveHigh = false;        // Alarm pin polarity
         AlarmAction     _alarmAction = AlarmAction::None;
@@ -87,6 +95,7 @@ namespace MotorDrivers {
         // Helper methods
         void            startHomingSequence();
         void            finishHomingSequence();
+        bool            waitForHomingComplete();         // Wait for homing complete pin signal
         static HomingMode parseHomingMode(const char* str);
         static const char* homingModeToString(HomingMode mode);
         static AlarmAction parseAlarmAction(const char* str);

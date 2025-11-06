@@ -14,7 +14,8 @@ Unlike traditional stepper motors that home by moving until they hit a limit swi
   - **Hold Mode**: Signal stays active for the entire homing duration
   - **Pulse Mode**: Signal pulses briefly, then waits for motor to complete homing
 - **Configurable Durations**: Separate control of signal and settle times
-- **Automatic Completion**: After the configured time(s), the motor is automatically marked as homed
+- **Event-Driven Completion (Optional)**: Configure a homing complete pin to detect when the motor finishes homing instead of using timeouts
+- **Automatic Completion**: After the configured time(s) or complete signal, the motor is automatically marked as homed
 - **No Limit Switches Required**: The motor handles homing internally
 
 ### 2. Alarm Pin Monitoring
@@ -53,7 +54,7 @@ x:
       alarm_action: estop
 ```
 
-### Basic Configuration Example - Pulse Mode
+### Basic Configuration Example - Pulse Mode with Complete Detection
 
 ```yaml
 y:
@@ -68,6 +69,13 @@ y:
       homing_pin: gpio.32
       homing_mode: pulse
       homing_signal_ms: 100       # Brief 100ms pulse
+
+      # Option 1: Event-driven (wait for complete signal)
+      homing_complete_pin: gpio.35
+      homing_complete_active_high: true
+      homing_max_wait_ms: 8000    # Safety timeout
+
+      # Option 2: Time-based (if complete pin not configured)
       homing_settle_ms: 3000      # Wait 3 seconds for motor to home
 
       # Alarm pin configuration
@@ -93,7 +101,17 @@ y:
   - In **pulse mode**: How long the pulse lasts
 - `homing_settle_ms`: Time to wait for motor to complete homing in milliseconds (default: 2000)
   - In **hold mode**: Not used (can be left at 0)
-  - In **pulse mode**: How long to wait after pulse before marking as homed
+  - In **pulse mode**: How long to wait after pulse before marking as homed (only used if `homing_complete_pin` is not configured)
+
+#### Homing Complete Detection (Optional)
+- `homing_complete_pin`: Pin to monitor for homing completion signal (optional)
+  - When configured in pulse mode, driver waits for this pin instead of using timeout
+  - Motor sets this pin when homing is complete
+  - Falls back to `homing_settle_ms` timeout if pin not configured
+- `homing_complete_active_high`: Set to `true` if complete signal is active-high, `false` if active-low (default: true)
+- `homing_max_wait_ms`: Maximum time to wait for complete signal before timeout (default: 10000)
+  - Safety feature to prevent infinite waiting
+  - If exceeded, assumes homing is complete anyway
 
 #### Alarm Parameters
 - `alarm_pin`: Pin to monitor for motor alarms/faults (optional)
@@ -114,20 +132,28 @@ Many closed-loop stepper motors have:
 
 The SignalHomingStepper is ideal for these motors.
 
-### Example: Leadshine Closed-Loop Steppers (Pulse Mode)
+### Example: Leadshine Closed-Loop Steppers (Pulse Mode with Complete Pin)
 ```yaml
 motor0:
   signal_homing_stepper:
     step_pin: I2SO.0
     direction_pin: I2SO.1
     disable_pin: I2SO.2
-    homing_pin: gpio.26        # Connected to motor's HOME signal input
-    homing_mode: pulse         # Motor triggers on pulse
-    homing_signal_ms: 50       # 50ms pulse
-    homing_settle_ms: 5000     # Motor completes homing within 5 seconds
-    alarm_pin: gpio.27         # Connected to motor's ALM output
-    alarm_active_high: false   # ALM is active-low
-    alarm_action: estop        # Stop everything on motor fault
+    homing_pin: gpio.26            # Connected to motor's HOME signal input
+    homing_mode: pulse             # Motor triggers on pulse
+    homing_signal_ms: 50           # 50ms pulse
+
+    # Event-driven completion
+    homing_complete_pin: gpio.36   # Connected to motor's HOMING_DONE output
+    homing_complete_active_high: true
+    homing_max_wait_ms: 10000      # 10 second safety timeout
+
+    # Fallback if motor doesn't signal completion
+    homing_settle_ms: 5000
+
+    alarm_pin: gpio.27             # Connected to motor's ALM output
+    alarm_active_high: false       # ALM is active-low
+    alarm_action: estop            # Stop everything on motor fault
 ```
 
 ### Example: Custom Motor Controller (Hold Mode)
@@ -177,19 +203,28 @@ When a homing cycle (`$H` or `$HX`) is initiated with pulse mode:
 1. **Signal Pulse**: The homing pin is set high
 2. **Pulse Duration**: The signal stays active for `homing_signal_ms` milliseconds
 3. **Signal Released**: The homing pin is set low
-4. **Settle Period**: The driver waits for `homing_settle_ms` milliseconds
+4. **Wait for Completion**:
+   - **Option A (Event-Driven)**: If `homing_complete_pin` is configured:
+     - Poll the complete pin every 10ms
+     - When pin indicates completion, proceed immediately
+     - If `homing_max_wait_ms` timeout is reached, assume completion
+   - **Option B (Time-Based)**: If `homing_complete_pin` is NOT configured:
+     - Wait for `homing_settle_ms` milliseconds
 5. **Completion**: The motor is marked as homed at the configured home position (`mpos_mm`)
 
-The motor starts homing when the pulse is received and completes during the settle period.
+The motor starts homing when the pulse is received and completes either when signaled or after timeout.
 
 **Use case**: Motors that start homing on a trigger pulse and complete autonomously (typical for closed-loop steppers).
+
+**Advantage of complete pin**: More responsive - homing finishes as soon as motor completes, rather than waiting for worst-case timeout.
 
 ### Timing Comparison
 
 | Mode | Signal Duration | Wait After Signal | Total Time |
 |------|----------------|-------------------|------------|
 | Hold | `homing_signal_ms` | 0 | `homing_signal_ms` |
-| Pulse | `homing_signal_ms` | `homing_settle_ms` | `homing_signal_ms + homing_settle_ms` |
+| Pulse (time-based) | `homing_signal_ms` | `homing_settle_ms` | `homing_signal_ms + homing_settle_ms` |
+| Pulse (event-driven) | `homing_signal_ms` | Until complete pin or `homing_max_wait_ms` | `homing_signal_ms` + actual homing time |
 
 ## Alarm Handling
 
@@ -205,10 +240,20 @@ The alarm pin is continuously monitored. When an alarm condition is detected (ba
 ### Homing Pin
 - **Output Type**: The homing pin is configured as a GPIO output
 - **Signal Level**: Typically 3.3V logic (ESP32 native)
-- **Duration**: Held high for `homing_timeout_ms`
+- **Duration**: Held high for configured duration (mode dependent)
 - **Motor Interface**: Connect to your motor's homing trigger input
   - May require level shifting for 5V motors
   - May require opto-isolation depending on motor
+
+### Homing Complete Pin (Optional)
+- **Input Type**: The homing complete pin is configured as a GPIO input
+- **Signal Level**: Typically 3.3V logic (ESP32 native)
+- **Polarity**: Configure `homing_complete_active_high` to match your motor's output
+- **Motor Interface**: Connect to your motor's "homing done" or "ready" output
+  - May require level shifting
+  - May require opto-isolation
+  - Should be stable (not pulsed) - driver polls this pin
+  - Consider adding RC filtering for noise immunity
 
 ### Alarm Pin
 - **Input Type**: The alarm pin is configured as a GPIO input with pull-up
@@ -222,8 +267,9 @@ The alarm pin is continuously monitored. When an alarm condition is detected (ba
 ### Example Circuit
 
 ```
-Motor Homing Input ←─[Level Shift/Optocoupler]─ ESP32 GPIO (homing_pin)
-Motor Alarm Output ─→[Level Shift/Optocoupler]─→ ESP32 GPIO (alarm_pin)
+Motor Homing Input    ←─[Level Shift/Optocoupler]─ ESP32 GPIO (homing_pin)
+Motor Complete Output ─→[Level Shift/Optocoupler]─→ ESP32 GPIO (homing_complete_pin)
+Motor Alarm Output    ─→[Level Shift/Optocoupler]─→ ESP32 GPIO (alarm_pin)
 ```
 
 ## Troubleshooting
@@ -233,6 +279,12 @@ Motor Alarm Output ─→[Level Shift/Optocoupler]─→ ESP32 GPIO (alarm_pin)
 - **Check durations**:
   - For hold mode: Ensure `homing_signal_ms` is long enough
   - For pulse mode: Ensure `homing_signal_ms` pulse is detected and `homing_settle_ms` allows enough time
+- **Check complete pin** (if using):
+  - Verify pin is actually connected
+  - Check polarity with `homing_complete_active_high`
+  - Use oscilloscope to confirm motor sets the pin when done
+  - Check that `homing_max_wait_ms` is long enough
+  - Check logs for "Homing complete timeout" warnings
 - **Verify signal**: Use an oscilloscope to confirm the homing pin timing matches your configuration
 - **Check wiring**: Verify the homing pin is connected to the motor's trigger input
 - **Motor settings**: Ensure the motor is configured to respond to the homing signal correctly
@@ -293,6 +345,13 @@ macros:
 - Motor driver-specific documentation for your hardware
 
 ## Version History
+
+- **v1.2** (2025): Added event-driven homing complete detection
+  - Optional homing complete pin for pulse mode
+  - Configurable polarity for complete signal
+  - Safety timeout with `homing_max_wait_ms`
+  - Polls complete pin every 10ms for responsive completion
+  - Falls back to time-based completion if pin not configured
 
 - **v1.1** (2025): Added dual homing modes
   - Hold mode: Signal stays active for entire homing duration
