@@ -1,0 +1,156 @@
+# Example configuration for SignalHomingStepper motor driver
+#
+# This motor type is designed for motors that:
+# - Operate like standard steppers (pulse/dir signals)
+# - Have their own internal homing mechanism triggered by a signal
+# - Can provide alarm/fault signals that trigger configurable actions
+#
+# Typical use case: Closed-loop stepper motors with built-in homing and fault detection
+
+name: "SignalHomingStepper Example"
+board: "None"
+
+stepping:
+  engine: I2S_STREAM
+  idle_ms: 250
+  pulse_us: 4
+  dir_delay_us: 1
+  disable_delay_us: 0
+
+axes:
+  shared_stepper_disable_pin: NO_PIN
+
+  x:
+    steps_per_mm: 80.000
+    max_rate_mm_per_min: 5000.000
+    acceleration_mm_per_sec2: 100.000
+    max_travel_mm: 300.000
+    soft_limits: false
+
+    homing:
+      cycle: 1
+      positive_direction: false
+      mpos_mm: 0.000
+      feed_mm_per_min: 100.000
+      seek_mm_per_min: 200.000
+      settle_ms: 500
+      seek_scaler: 1.100
+      feed_scaler: 1.100
+
+    motor0:
+      limit_neg_pin: NO_PIN
+      limit_pos_pin: NO_PIN
+      limit_all_pin: NO_PIN
+      hard_limits: false
+      pulloff_mm: 1.000
+
+      signal_homing_stepper:
+        # Standard stepper pins
+        step_pin: I2SO.0
+        direction_pin: I2SO.1
+        disable_pin: I2SO.2
+
+        # Signal homing configuration
+        # This pin will be pulsed high when homing is initiated
+        homing_pin: gpio.26
+        # Duration to keep the homing signal active (ms)
+        homing_timeout_ms: 2000
+
+        # Alarm pin configuration
+        # This pin is monitored for fault conditions from the motor
+        alarm_pin: gpio.27
+        # Set to true if alarm is active-high, false if active-low
+        alarm_active_high: false
+        # Action to take when alarm is triggered:
+        # - none: Just log the alarm
+        # - estop: Trigger emergency stop (alarm state)
+        # - pause: Pause program execution (feed hold)
+        # - macro0/macro1/macro2/macro3: Execute a macro
+        alarm_action: estop
+
+  y:
+    steps_per_mm: 80.000
+    max_rate_mm_per_min: 5000.000
+    acceleration_mm_per_sec2: 100.000
+    max_travel_mm: 300.000
+    soft_limits: false
+
+    homing:
+      cycle: 1
+      positive_direction: false
+      mpos_mm: 0.000
+      feed_mm_per_min: 100.000
+      seek_mm_per_min: 200.000
+      settle_ms: 500
+
+    motor0:
+      limit_neg_pin: NO_PIN
+      limit_pos_pin: NO_PIN
+      limit_all_pin: NO_PIN
+      hard_limits: false
+      pulloff_mm: 1.000
+
+      signal_homing_stepper:
+        step_pin: I2SO.3
+        direction_pin: I2SO.4
+        disable_pin: I2SO.5
+        homing_pin: gpio.32
+        homing_timeout_ms: 2000
+        alarm_pin: gpio.33
+        alarm_active_high: false
+        # Example: Pause instead of stopping on alarm
+        alarm_action: pause
+
+  z:
+    steps_per_mm: 400.000
+    max_rate_mm_per_min: 1000.000
+    acceleration_mm_per_sec2: 50.000
+    max_travel_mm: 100.000
+    soft_limits: false
+
+    homing:
+      cycle: 2
+      positive_direction: true
+      mpos_mm: 100.000
+      feed_mm_per_min: 100.000
+      seek_mm_per_min: 200.000
+      settle_ms: 500
+
+    motor0:
+      limit_neg_pin: NO_PIN
+      limit_pos_pin: NO_PIN
+      limit_all_pin: NO_PIN
+      hard_limits: false
+      pulloff_mm: 1.000
+
+      signal_homing_stepper:
+        step_pin: I2SO.6
+        direction_pin: I2SO.7
+        disable_pin: I2SO.8
+        homing_pin: gpio.25
+        homing_timeout_ms: 3000
+        alarm_pin: gpio.34
+        alarm_active_high: false
+        # Example: Execute a macro when alarm triggers
+        alarm_action: macro0
+
+spi:
+  miso_pin: gpio.19
+  mosi_pin: gpio.23
+  sck_pin: gpio.18
+
+sdcard:
+  card_detect_pin: NO_PIN
+  cs_pin: gpio.5
+
+# Macro that could be executed on motor alarm
+macros:
+  macro0: |
+    # Handle motor alarm - could include:
+    # - Retracting to a safe position
+    # - Turning off spindle
+    # - Sending notification
+    G0 Z10
+
+start:
+  must_home: true
