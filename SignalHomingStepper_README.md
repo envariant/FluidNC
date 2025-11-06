@@ -9,9 +9,12 @@ The `SignalHomingStepper` is a specialized motor driver for FluidNC designed for
 ### 1. Signal-Based Homing
 Unlike traditional stepper motors that home by moving until they hit a limit switch, the SignalHomingStepper initiates homing by sending a signal to the motor:
 
-- **Homing Signal Pin**: A configurable output pin that pulses when homing is requested
-- **Configurable Timeout**: The signal is held active for a specified duration
-- **Automatic Completion**: After the timeout, the motor is automatically marked as homed
+- **Homing Signal Pin**: A configurable output pin that signals when homing is requested
+- **Two Homing Modes**:
+  - **Hold Mode**: Signal stays active for the entire homing duration
+  - **Pulse Mode**: Signal pulses briefly, then waits for motor to complete homing
+- **Configurable Durations**: Separate control of signal and settle times
+- **Automatic Completion**: After the configured time(s), the motor is automatically marked as homed
 - **No Limit Switches Required**: The motor handles homing internally
 
 ### 2. Alarm Pin Monitoring
@@ -27,7 +30,7 @@ The driver can monitor an alarm/fault pin from the motor and trigger configurabl
 
 ## Configuration
 
-### Basic Configuration Example
+### Basic Configuration Example - Hold Mode
 
 ```yaml
 x:
@@ -38,14 +41,39 @@ x:
       direction_pin: I2SO.1
       disable_pin: I2SO.2
 
-      # Signal homing configuration
+      # Signal homing configuration - Hold Mode
       homing_pin: gpio.26
-      homing_timeout_ms: 2000
+      homing_mode: hold
+      homing_signal_ms: 2000      # Signal stays active for 2 seconds
+      homing_settle_ms: 0         # Not used in hold mode
 
       # Alarm pin configuration
       alarm_pin: gpio.27
       alarm_active_high: false
       alarm_action: estop
+```
+
+### Basic Configuration Example - Pulse Mode
+
+```yaml
+y:
+  motor0:
+    signal_homing_stepper:
+      # Standard stepper pins
+      step_pin: I2SO.3
+      direction_pin: I2SO.4
+      disable_pin: I2SO.5
+
+      # Signal homing configuration - Pulse Mode
+      homing_pin: gpio.32
+      homing_mode: pulse
+      homing_signal_ms: 100       # Brief 100ms pulse
+      homing_settle_ms: 3000      # Wait 3 seconds for motor to home
+
+      # Alarm pin configuration
+      alarm_pin: gpio.33
+      alarm_active_high: false
+      alarm_action: pause
 ```
 
 ### Configuration Parameters
@@ -56,8 +84,16 @@ x:
 - `disable_pin`: Pin to enable/disable the motor (optional)
 
 #### Homing Parameters
-- `homing_pin`: Pin that will be pulsed to initiate homing (optional, but required for homing)
-- `homing_timeout_ms`: Duration to keep the homing signal active in milliseconds (default: 1000)
+- `homing_pin`: Pin that will be set high to initiate homing (optional, but required for homing)
+- `homing_mode`: Homing signal mode (default: hold)
+  - `hold`: Signal stays active for entire homing duration
+  - `pulse`: Signal pulses briefly, then releases while motor homes
+- `homing_signal_ms`: Duration of homing signal in milliseconds (default: 100)
+  - In **hold mode**: How long the signal stays active
+  - In **pulse mode**: How long the pulse lasts
+- `homing_settle_ms`: Time to wait for motor to complete homing in milliseconds (default: 2000)
+  - In **hold mode**: Not used (can be left at 0)
+  - In **pulse mode**: How long to wait after pulse before marking as homed
 
 #### Alarm Parameters
 - `alarm_pin`: Pin to monitor for motor alarms/faults (optional)
@@ -78,7 +114,7 @@ Many closed-loop stepper motors have:
 
 The SignalHomingStepper is ideal for these motors.
 
-### Example: Leadshine Closed-Loop Steppers
+### Example: Leadshine Closed-Loop Steppers (Pulse Mode)
 ```yaml
 motor0:
   signal_homing_stepper:
@@ -86,20 +122,24 @@ motor0:
     direction_pin: I2SO.1
     disable_pin: I2SO.2
     homing_pin: gpio.26        # Connected to motor's HOME signal input
-    homing_timeout_ms: 3000    # Motor completes homing within 3 seconds
+    homing_mode: pulse         # Motor triggers on pulse
+    homing_signal_ms: 50       # 50ms pulse
+    homing_settle_ms: 5000     # Motor completes homing within 5 seconds
     alarm_pin: gpio.27         # Connected to motor's ALM output
     alarm_active_high: false   # ALM is active-low
     alarm_action: estop        # Stop everything on motor fault
 ```
 
-### Example: Custom Motor Controller
+### Example: Custom Motor Controller (Hold Mode)
 ```yaml
 motor0:
   signal_homing_stepper:
     step_pin: I2SO.0
     direction_pin: I2SO.1
     homing_pin: gpio.26
-    homing_timeout_ms: 5000
+    homing_mode: hold          # Motor needs continuous signal
+    homing_signal_ms: 4000     # Keep signal active for 4 seconds
+    homing_settle_ms: 0        # Not used in hold mode
     alarm_pin: gpio.27
     alarm_active_high: false
     alarm_action: macro0       # Run custom error handling macro
@@ -117,14 +157,39 @@ macros:
 
 ## Homing Sequence
 
-When a homing cycle (`$H` or `$HX`) is initiated:
+### Hold Mode
 
-1. **Signal Sent**: The homing pin is set high (or to the configured state)
-2. **Wait Period**: The driver waits for `homing_timeout_ms` milliseconds
+When a homing cycle (`$H` or `$HX`) is initiated with hold mode:
+
+1. **Signal Active**: The homing pin is set high
+2. **Hold Period**: The signal stays active for `homing_signal_ms` milliseconds
 3. **Signal Released**: The homing pin is set low
 4. **Completion**: The motor is marked as homed at the configured home position (`mpos_mm`)
 
-The motor is expected to complete its internal homing routine during this time window.
+The motor is expected to complete its internal homing routine while the signal is held active.
+
+**Use case**: Motors that need a continuous "enable homing" signal during the entire homing process.
+
+### Pulse Mode
+
+When a homing cycle (`$H` or `$HX`) is initiated with pulse mode:
+
+1. **Signal Pulse**: The homing pin is set high
+2. **Pulse Duration**: The signal stays active for `homing_signal_ms` milliseconds
+3. **Signal Released**: The homing pin is set low
+4. **Settle Period**: The driver waits for `homing_settle_ms` milliseconds
+5. **Completion**: The motor is marked as homed at the configured home position (`mpos_mm`)
+
+The motor starts homing when the pulse is received and completes during the settle period.
+
+**Use case**: Motors that start homing on a trigger pulse and complete autonomously (typical for closed-loop steppers).
+
+### Timing Comparison
+
+| Mode | Signal Duration | Wait After Signal | Total Time |
+|------|----------------|-------------------|------------|
+| Hold | `homing_signal_ms` | 0 | `homing_signal_ms` |
+| Pulse | `homing_signal_ms` | `homing_settle_ms` | `homing_signal_ms + homing_settle_ms` |
 
 ## Alarm Handling
 
@@ -164,10 +229,13 @@ Motor Alarm Output ─→[Level Shift/Optocoupler]─→ ESP32 GPIO (alarm_pin)
 ## Troubleshooting
 
 ### Homing Doesn't Complete
-- **Check timeout**: Ensure `homing_timeout_ms` is long enough for your motor
-- **Verify signal**: Use an oscilloscope to confirm the homing pin is pulsing
+- **Check mode**: Verify you're using the correct `homing_mode` (hold vs pulse)
+- **Check durations**:
+  - For hold mode: Ensure `homing_signal_ms` is long enough
+  - For pulse mode: Ensure `homing_signal_ms` pulse is detected and `homing_settle_ms` allows enough time
+- **Verify signal**: Use an oscilloscope to confirm the homing pin timing matches your configuration
 - **Check wiring**: Verify the homing pin is connected to the motor's trigger input
-- **Motor settings**: Ensure the motor is configured to respond to the homing signal
+- **Motor settings**: Ensure the motor is configured to respond to the homing signal correctly
 
 ### Alarm Triggers Unexpectedly
 - **Check polarity**: Verify `alarm_active_high` matches your motor's output
@@ -211,9 +279,10 @@ macros:
 |---------|----------------|-------------------|
 | Step/Dir control | ✓ | ✓ |
 | Limit switches | Required for homing | Not used |
-| Homing method | Move to limit | Signal-based |
+| Homing method | Move to limit | Signal-based (hold or pulse) |
 | Alarm monitoring | Via separate pins | Integrated |
 | Timeout-based homing | ✗ | ✓ |
+| Pulse-triggered homing | ✗ | ✓ |
 | Custom alarm actions | ✗ | ✓ |
 
 ## See Also
@@ -224,6 +293,12 @@ macros:
 - Motor driver-specific documentation for your hardware
 
 ## Version History
+
+- **v1.1** (2025): Added dual homing modes
+  - Hold mode: Signal stays active for entire homing duration
+  - Pulse mode: Brief pulse followed by settle period
+  - Separate configuration for signal and settle durations
+  - Improved logging with mode-specific messages
 
 - **v1.0** (2025): Initial implementation
   - Signal-based homing

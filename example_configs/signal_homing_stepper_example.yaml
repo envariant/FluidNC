@@ -51,10 +51,22 @@ axes:
         disable_pin: I2SO.2
 
         # Signal homing configuration
-        # This pin will be pulsed high when homing is initiated
+        # This pin will be set high when homing is initiated
         homing_pin: gpio.26
-        # Duration to keep the homing signal active (ms)
-        homing_timeout_ms: 2000
+
+        # Homing mode: "hold" or "pulse"
+        # - hold: Signal stays active for homing_signal_ms duration
+        # - pulse: Signal pulses for homing_signal_ms, then waits homing_settle_ms
+        homing_mode: hold
+
+        # Duration of the homing signal (ms)
+        # For hold mode: how long the signal stays active
+        # For pulse mode: how long the pulse lasts
+        homing_signal_ms: 2000
+
+        # Settle duration (ms) - only used in pulse mode
+        # Time to wait after pulse for motor to complete homing
+        homing_settle_ms: 5000
 
         # Alarm pin configuration
         # This pin is monitored for fault conditions from the motor
@@ -95,7 +107,13 @@ axes:
         direction_pin: I2SO.4
         disable_pin: I2SO.5
         homing_pin: gpio.32
-        homing_timeout_ms: 2000
+
+        # Example: Using pulse mode
+        # Brief 100ms pulse followed by 3s wait
+        homing_mode: pulse
+        homing_signal_ms: 100
+        homing_settle_ms: 3000
+
         alarm_pin: gpio.33
         alarm_active_high: false
         # Example: Pause instead of stopping on alarm
@@ -128,7 +146,12 @@ axes:
         direction_pin: I2SO.7
         disable_pin: I2SO.8
         homing_pin: gpio.25
-        homing_timeout_ms: 3000
+
+        # Example: Another hold mode configuration
+        homing_mode: hold
+        homing_signal_ms: 3000
+        homing_settle_ms: 0  # Not used in hold mode
+
         alarm_pin: gpio.34
         alarm_active_high: false
         # Example: Execute a macro when alarm triggers

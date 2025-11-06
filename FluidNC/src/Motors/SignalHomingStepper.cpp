@@ -64,17 +64,34 @@ namespace MotorDrivers {
 
         _isHoming = true;
 
-        // Send the homing signal
-        _homingPin.synchronousWrite(true);
-        log_info(axisName() << " SignalHomingStepper: Homing signal sent");
+        if (_homingMode == HomingMode::Hold) {
+            // Mode A: Hold signal active for entire homing duration
+            _homingPin.synchronousWrite(true);
+            log_info(axisName() << " SignalHomingStepper: Homing signal active (hold mode, "
+                     << _homingSignalMs << "ms)");
 
-        // Wait for the configured timeout
-        delay_ms(_homingTimeoutMs);
+            delay_ms(_homingSignalMs);
 
-        // De-assert the homing signal
-        _homingPin.synchronousWrite(false);
+            _homingPin.synchronousWrite(false);
+            log_info(axisName() << " SignalHomingStepper: Homing complete");
 
-        log_info(axisName() << " SignalHomingStepper: Homing complete after " << _homingTimeoutMs << "ms");
+        } else {
+            // Mode B: Pulse signal briefly, then wait for motor to complete homing
+            _homingPin.synchronousWrite(true);
+            log_info(axisName() << " SignalHomingStepper: Homing pulse sent ("
+                     << _homingSignalMs << "ms pulse)");
+
+            delay_ms(_homingSignalMs);
+
+            _homingPin.synchronousWrite(false);
+            log_info(axisName() << " SignalHomingStepper: Waiting for motor to home ("
+                     << _homingSettleMs << "ms)");
+
+            delay_ms(_homingSettleMs);
+
+            log_info(axisName() << " SignalHomingStepper: Homing complete (total: "
+                     << (_homingSignalMs + _homingSettleMs) << "ms)");
+        }
     }
 
     void SignalHomingStepper::finishHomingSequence() {
@@ -136,10 +153,18 @@ namespace MotorDrivers {
     }
 
     void SignalHomingStepper::config_message() {
+        std::string homingInfo;
+        if (_homingMode == HomingMode::Hold) {
+            homingInfo = std::to_string(_homingSignalMs) + "ms hold";
+        } else {
+            homingInfo = std::to_string(_homingSignalMs) + "ms pulse, " +
+                        std::to_string(_homingSettleMs) + "ms settle";
+        }
+
         log_info("    " << name() << " Step:" << _step_pin.name()
                  << " Dir:" << _dir_pin.name()
                  << " Disable:" << _disable_pin.name()
-                 << " Homing:" << _homingPin.name() << "(" << _homingTimeoutMs << "ms)"
+                 << " Homing:" << _homingPin.name() << "(" << homingModeToString(_homingMode) << ": " << homingInfo << ")"
                  << " Alarm:" << _alarmPin.name() << "(" << alarmActionToString(_alarmAction) << ")");
     }
 
@@ -159,7 +184,9 @@ namespace MotorDrivers {
 
         // Add signal homing configuration
         handler.item("homing_pin", _homingPin);
-        handler.item("homing_timeout_ms", _homingTimeoutMs);
+        handler.section("homing_mode", _homingMode, parseHomingMode, homingModeToString);
+        handler.item("homing_signal_ms", _homingSignalMs);
+        handler.item("homing_settle_ms", _homingSettleMs);
 
         // Add alarm configuration
         handler.item("alarm_pin", _alarmPin);
@@ -167,6 +194,32 @@ namespace MotorDrivers {
 
         // Alarm action as a string
         handler.section("alarm_action", _alarmAction, parseAlarmAction, alarmActionToString);
+    }
+
+    SignalHomingStepper::HomingMode SignalHomingStepper::parseHomingMode(const char* str) {
+        if (!str) {
+            return HomingMode::Hold;
+        }
+
+        if (strcasecmp(str, "hold") == 0) {
+            return HomingMode::Hold;
+        } else if (strcasecmp(str, "pulse") == 0) {
+            return HomingMode::Pulse;
+        }
+
+        log_warn("Unknown homing mode: " << str << ", using 'hold'");
+        return HomingMode::Hold;
+    }
+
+    const char* SignalHomingStepper::homingModeToString(HomingMode mode) {
+        switch (mode) {
+            case HomingMode::Hold:
+                return "hold";
+            case HomingMode::Pulse:
+                return "pulse";
+            default:
+                return "hold";
+        }
     }
 
     SignalHomingStepper::AlarmAction SignalHomingStepper::parseAlarmAction(const char* str) {

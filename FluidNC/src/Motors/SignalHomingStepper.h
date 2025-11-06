@@ -30,6 +30,10 @@ namespace MotorDrivers {
      * - Homing sends a signal via a configurable pin
      * - After a configurable timeout, the motor is automatically marked as homed
      *
+     * Two homing modes are supported:
+     * - Hold: Signal is held active for the entire duration until homing completes
+     * - Pulse: Signal is pulsed briefly, then released while waiting for motor to home
+     *
      * It also supports an alarm pin that can trigger various actions:
      * - e-stop: Trigger an alarm and halt the system
      * - pause: Pause program execution (feed hold)
@@ -37,6 +41,11 @@ namespace MotorDrivers {
      */
     class SignalHomingStepper : public StandardStepper {
     public:
+        enum class HomingMode {
+            Hold,   // Hold signal active for entire homing duration
+            Pulse   // Pulse signal briefly, then wait for motor to home
+        };
+
         enum class AlarmAction {
             None,
             EStop,
@@ -64,10 +73,12 @@ namespace MotorDrivers {
         void group(Configuration::HandlerBase& handler) override;
 
     private:
-        Pin             _homingPin;              // Pin to signal when homing
-        uint32_t        _homingTimeoutMs = 1000; // Time to wait after signaling before marking homed
-        MotorAlarmPin   _alarmPin;               // Pin to monitor for alarm conditions
-        bool            _alarmActiveHigh = false;// Alarm pin polarity
+        Pin             _homingPin;                      // Pin to signal when homing
+        HomingMode      _homingMode = HomingMode::Hold;  // Homing signal mode
+        uint32_t        _homingSignalMs = 100;           // Duration of homing signal pulse/hold
+        uint32_t        _homingSettleMs = 2000;          // Time to wait for motor to complete homing
+        MotorAlarmPin   _alarmPin;                       // Pin to monitor for alarm conditions
+        bool            _alarmActiveHigh = false;        // Alarm pin polarity
         AlarmAction     _alarmAction = AlarmAction::None;
 
         // State tracking
@@ -76,6 +87,8 @@ namespace MotorDrivers {
         // Helper methods
         void            startHomingSequence();
         void            finishHomingSequence();
+        static HomingMode parseHomingMode(const char* str);
+        static const char* homingModeToString(HomingMode mode);
         static AlarmAction parseAlarmAction(const char* str);
         static const char* alarmActionToString(AlarmAction action);
     };
